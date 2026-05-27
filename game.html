@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini jeu pixel art</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-border: #334155;
+      --text: #e5eefc;
+      --muted: #94a3b8;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top, rgba(59, 130, 246, 0.16), transparent 32%),
+        var(--bg);
+      color: var(--text);
+      font-family: Arial, sans-serif;
+    }
+
+    .app {
+      width: min(100%, 1120px);
+      display: grid;
+      gap: 16px;
+    }
+
+    .panel {
+      background: rgba(17, 24, 39, 0.92);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 20px 55px rgba(0, 0, 0, 0.28);
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.7rem;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 16px;
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: rgba(51, 65, 85, 0.55);
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    button,
+    a.button-link {
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 16px;
+      font: inherit;
+      font-weight: 700;
+      color: #eff6ff;
+      background: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+
+    button:hover,
+    a.button-link:hover {
+      background: var(--accent-hover);
+    }
+
+    .game-shell {
+      overflow: auto;
+      background: #020617;
+      border-radius: 18px;
+      border: 1px solid var(--panel-border);
+      padding: 16px;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      margin: 0 auto;
+      background: #8fd3ff;
+      border-radius: 12px;
+      image-rendering: pixelated;
+      outline: none;
+    }
+
+    .hint {
+      margin-top: 14px;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <div class="header">
+        <div>
+          <h1>Mini jeu avec votre sprite</h1>
+          <p>Deplacez le personnage avec les fleches du clavier et ramassez toutes les etoiles.</p>
+        </div>
+        <a class="button-link" href="./play.html">Plage pixel art</a>
+        <a class="button-link" href="./index.html">Retour a l'editeur</a>
+      </div>
+
+      <div class="toolbar">
+        <button id="restart-button" type="button">Recommencer</button>
+        <span class="pill" id="score-pill">Etoiles: 0 / 8</span>
+        <span class="pill" id="direction-pill">Direction: bas</span>
+      </div>
+      <p class="hint" id="message">Le sprite est charge depuis `assets/player-sprites.png`.</p>
+    </section>
+
+    <section class="panel game-shell">
+      <canvas id="game" width="960" height="576" aria-label="Mini jeu avec deplacement au clavier" tabindex="0"></canvas>
+    </section>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const restartButton = document.getElementById("restart-button");
+    const scorePill = document.getElementById("score-pill");
+    const directionPill = document.getElementById("direction-pill");
+    const message = document.getElementById("message");
+
+    const spriteSheet = new Image();
+    spriteSheet.src = "./assets/player-sprites.png";
+
+    const world = {
+      width: 1800,
+      height: 1200,
+    };
+
+    const camera = {
+      x: 0,
+      y: 0,
+    };
+
+    const keys = {
+      ArrowUp: false,
+      ArrowDown: false,
+      ArrowLeft: false,
+      ArrowRight: false,
+    };
+
+    const directionLabels = {
+      down: "bas",
+      up: "haut",
+      left: "gauche",
+      right: "droite",
+    };
+
+    let spriteFrames = null;
+    let lastTime = 0;
+    let animationFrameId = null;
+
+    const player = {
+      x: world.width / 2,
+      y: world.height / 2,
+      speed: 220,
+      direction: "down",
+      moving: false,
+      animationTime: 0,
+    };
+
+    let stars = [];
+    let collectedStars = 0;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function isSpritePixel(r, g, b, a) {
+      if (a < 10) {
+        return false;
+      }
+
+      return !(r > 245 && g > 245 && b > 245);
+    }
+
+    function detectFrameInRegion(imageData, width, minX, minY, maxX, maxY, fallback) {
+      let found = false;
+      let left = maxX;
+      let right = minX;
+      let top = maxY;
+      let bottom = minY;
+
+      for (let y = minY; y < maxY; y += 1) {
+        for (let x = minX; x < maxX; x += 1) {
+          const offset = (y * width + x) * 4;
+          const r = imageData[offset];
+          const g = imageData[offset + 1];
+          const b = imageData[offset + 2];
+          const a = imageData[offset + 3];
+
+          if (!isSpritePixel(r, g, b, a)) {
+            continue;
+          }
+
+          found = true;
+          left = Math.min(left, x);
+          right = Math.max(right, x);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+
+      if (!found) {
+        return fallback;
+      }
+
+      return {
+        x: Math.max(0, left - 2),
+        y: Math.max(0, top - 2),
+        width: Math.max(1, right - left + 5),
+        height: Math.max(1, bottom - top + 5),
+      };
+    }
+
+    function analyzeSpriteSheet(image) {
+      const offscreen = document.createElement("canvas");
+      offscreen.width = image.width;
+      offscreen.height = image.height;
+      const offscreenCtx = offscreen.getContext("2d");
+      offscreenCtx.drawImage(image, 0, 0);
+
+      const data = offscreenCtx.getImageData(0, 0, image.width, image.height).data;
+      const gridLeft = 235;
+      const gridRight = image.width - 70;
+      const gridTop = 18;
+      const gridBottom = image.height - 18;
+      const cellWidth = (gridRight - gridLeft) / 4;
+      const cellHeight = (gridBottom - gridTop) / 4;
+      const directionOrder = ["down", "up", "left", "right"];
+      const frames = {};
+
+      for (let row = 0; row < 4; row += 1) {
+        const direction = directionOrder[row];
+        frames[direction] = [];
+
+        for (let col = 0; col < 4; col += 1) {
+          const searchLeft = Math.floor(gridLeft + col * cellWidth + 18);
+          const searchRight = Math.ceil(gridLeft + (col + 1) * cellWidth - 18);
+          const searchTop = Math.floor(gridTop + row * cellHeight + 12);
+          const searchBottom = Math.ceil(gridTop + (row + 1) * cellHeight - 12);
+          const fallback = {
+            x: searchLeft,
+            y: searchTop,
+            width: Math.max(1, searchRight - searchLeft),
+            height: Math.max(1, searchBottom - searchTop),
+          };
+
+          frames[direction].push(
+            detectFrameInRegion(data, image.width, searchLeft, searchTop, searchRight, searchBottom, fallback)
+          );
+        }
+      }
+
+      return frames;
+    }
+
+    function createStars() {
+      const starList = [];
+      const total = 8;
+      const padding = 120;
+
+      for (let index = 0; index < total; index += 1) {
+        starList.push({
+          x: padding + Math.random() * (world.width - padding * 2),
+          y: padding + Math.random() * (world.height - padding * 2),
+          collected: false,
+          pulse: Math.random() * Math.PI * 2,
+        });
+      }
+
+      return starList;
+    }
+
+    function resetGame() {
+      player.x = world.width / 2;
+      player.y = world.height / 2;
+      player.direction = "down";
+      player.moving = false;
+      player.animationTime = 0;
+      collectedStars = 0;
+      stars = createStars();
+      updateHud();
+      message.textContent = "Ramassez les 8 etoiles avec les fleches du clavier.";
+      canvas.focus();
+    }
+
+    function updateHud() {
+      scorePill.textContent = `Etoiles: ${collectedStars} / ${stars.length}`;
+      directionPill.textContent = `Direction: ${directionLabels[player.direction]}`;
+    }
+
+    function getInputVector() {
+      let x = 0;
+      let y = 0;
+
+      if (keys.ArrowLeft) {
+        x -= 1;
+      }
+      if (keys.ArrowRight) {
+        x += 1;
+      }
+      if (keys.ArrowUp) {
+        y -= 1;
+      }
+      if (keys.ArrowDown) {
+        y += 1;
+      }
+
+      if (x !== 0 && y !== 0) {
+        const length = Math.hypot(x, y);
+        x /= length;
+        y /= length;
+      }
+
+      return { x, y };
+    }
+
+    function updatePlayer(delta) {
+      const input = getInputVector();
+      player.moving = input.x !== 0 || input.y !== 0;
+
+      if (player.moving) {
+        player.x += input.x * player.speed * delta;
+        player.y += input.y * player.speed * delta;
+        player.x = clamp(player.x, 60, world.width - 60);
+        player.y = clamp(player.y, 80, world.height - 40);
+        player.animationTime += delta;
+
+        if (Math.abs(input.x) > Math.abs(input.y)) {
+          player.direction = input.x > 0 ? "right" : "left";
+        } else {
+          player.direction = input.y > 0 ? "down" : "up";
+        }
+      } else {
+        player.animationTime = 0;
+      }
+
+      updateHud();
+    }
+
+    function updateCamera() {
+      camera.x = clamp(player.x - canvas.width / 2, 0, world.width - canvas.width);
+      camera.y = clamp(player.y - canvas.height / 2, 0, world.height - canvas.height);
+    }
+
+    function collectStars(delta) {
+      for (const star of stars) {
+        if (star.collected) {
+          continue;
+        }
+
+        star.pulse += delta * 3;
+        const distance = Math.hypot(star.x - player.x, star.y - (player.y - 28));
+
+        if (distance < 42) {
+          star.collected = true;
+          collectedStars += 1;
+        }
+      }
+
+      if (collectedStars === stars.length) {
+        message.textContent = "Bravo, vous avez ramasse toutes les etoiles.";
+      }
+    }
+
+    function drawSky() {
+      const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      skyGradient.addColorStop(0, "#7dd3fc");
+      skyGradient.addColorStop(1, "#bfdbfe");
+      ctx.fillStyle = skyGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawGround() {
+      ctx.fillStyle = "#86efac";
+      ctx.fillRect(0, canvas.height * 0.52, canvas.width, canvas.height * 0.48);
+
+      for (let y = -40; y < world.height; y += 70) {
+        for (let x = -40; x < world.width; x += 70) {
+          const screenX = x - camera.x;
+          const screenY = y - camera.y;
+          if (screenX < -30 || screenX > canvas.width + 30 || screenY < -30 || screenY > canvas.height + 30) {
+            continue;
+          }
+
+          ctx.fillStyle = (Math.floor(x / 70) + Math.floor(y / 70)) % 2 === 0 ? "#6ee7b7" : "#4ade80";
+          ctx.fillRect(screenX, screenY, 72, 72);
+        }
+      }
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+      for (let x = 0; x < world.width; x += 220) {
+        const screenX = x - camera.x;
+        ctx.fillRect(screenX, 84 - camera.y, 120, 5);
+      }
+    }
+
+    function drawStar(x, y, radius, fillStyle) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.beginPath();
+      for (let point = 0; point < 10; point += 1) {
+        const angle = -Math.PI / 2 + point * (Math.PI / 5);
+        const currentRadius = point % 2 === 0 ? radius : radius * 0.45;
+        const px = Math.cos(angle) * currentRadius;
+        const py = Math.sin(angle) * currentRadius;
+
+        if (point === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+      ctx.closePath();
+      ctx.fillStyle = fillStyle;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawStars() {
+      for (const star of stars) {
+        if (star.collected) {
+          continue;
+        }
+
+        const screenX = star.x - camera.x;
+        const screenY = star.y - camera.y;
+
+        if (screenX < -40 || screenX > canvas.width + 40 || screenY < -40 || screenY > canvas.height + 40) {
+          continue;
+        }
+
+        const radius = 16 + Math.sin(star.pulse) * 2.5;
+        drawStar(screenX, screenY, radius, "#fde047");
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.32)";
+        ctx.beginPath();
+        ctx.arc(screenX - 4, screenY - 6, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function getCurrentFrame() {
+      const frames = spriteFrames[player.direction];
+
+      if (!player.moving) {
+        return frames[0];
+      }
+
+      const frameIndex = Math.floor(player.animationTime / 0.12) % frames.length;
+      return frames[frameIndex];
+    }
+
+    function drawPlayer() {
+      const frame = getCurrentFrame();
+      const scale = 3.2;
+      const drawWidth = frame.width * scale;
+      const drawHeight = frame.height * scale;
+      const drawX = Math.round(player.x - camera.x - drawWidth / 2);
+      const drawY = Math.round(player.y - camera.y - drawHeight);
+
+      ctx.fillStyle = "rgba(15, 23, 42, 0.18)";
+      ctx.beginPath();
+      ctx.ellipse(player.x - camera.x, player.y - camera.y + 4, 32, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.drawImage(
+        spriteSheet,
+        frame.x,
+        frame.y,
+        frame.width,
+        frame.height,
+        drawX,
+        drawY,
+        drawWidth,
+        drawHeight
+      );
+    }
+
+    function drawBounds() {
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(-camera.x, -camera.y, world.width, world.height);
+    }
+
+    function drawScene() {
+      drawSky();
+      drawGround();
+      drawStars();
+      drawBounds();
+      drawPlayer();
+    }
+
+    function loop(timestamp) {
+      const delta = Math.min((timestamp - lastTime) / 1000, 0.033);
+      lastTime = timestamp;
+
+      updatePlayer(delta);
+      collectStars(delta);
+      updateCamera();
+      drawScene();
+
+      animationFrameId = window.requestAnimationFrame(loop);
+    }
+
+    function startGame() {
+      spriteFrames = analyzeSpriteSheet(spriteSheet);
+      resetGame();
+      lastTime = performance.now();
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      animationFrameId = window.requestAnimationFrame(loop);
+    }
+
+    function handleKeyChange(event, pressed) {
+      if (!(event.key in keys)) {
+        return;
+      }
+
+      event.preventDefault();
+      keys[event.key] = pressed;
+    }
+
+    window.addEventListener("keydown", (event) => {
+      handleKeyChange(event, true);
+    });
+
+    window.addEventListener("keyup", (event) => {
+      handleKeyChange(event, false);
+    });
+
+    restartButton.addEventListener("click", () => {
+      resetGame();
+    });
+
+    canvas.addEventListener("click", () => {
+      canvas.focus();
+    });
+
+    window.addEventListener("blur", () => {
+      for (const key of Object.keys(keys)) {
+        keys[key] = false;
+      }
+    });
+
+    spriteSheet.addEventListener("load", () => {
+      startGame();
+    });
+
+    spriteSheet.addEventListener("error", () => {
+      message.textContent = "Impossible de charger la spritesheet.";
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "24px Arial";
+      ctx.fillText("Echec du chargement du sprite.", 40, 80);
+    });
+  </script>
+</body>
+</html>
