@@ -41,3 +41,4 @@ build/
 *
 !.gitignore
 !index.html
+!README.md
