@@ -37,5 +37,7 @@ build/
 *.tmp
 .cache/
 
-# Fichiers accidentels / brouillons locaux
-assets/o
+# Dépôt GitHub : index.html uniquement (reste en local)
+*
+!.gitignore
+!index.html
