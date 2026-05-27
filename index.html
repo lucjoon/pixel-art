@@ -96,6 +96,22 @@
       background: var(--accent-hover);
     }
 
+    .tool-button {
+      background: #374151;
+    }
+
+    .tool-button:hover {
+      background: #4b5563;
+    }
+
+    .tool-button.active {
+      background: var(--accent);
+    }
+
+    .tool-button.active:hover {
+      background: var(--accent-hover);
+    }
+
     .color-button {
       width: 34px;
       height: 34px;
@@ -153,9 +169,10 @@
   <main class="app">
     <section class="panel">
       <h1>Editeur de pixels 64x64</h1>
-      <p>Choisissez une couleur, puis cliquez ou glissez sur la grille pour dessiner. Recliquez avec la meme couleur pour effacer un pixel.</p>
+      <p>Choisissez une couleur pour dessiner, ou activez la gomme (bouton ou touche <strong>G</strong>) pour effacer en glissant.</p>
 
       <div class="toolbar">
+        <button id="eraser-button" type="button" class="tool-button" title="Gomme (G)">Gomme</button>
         <button id="clear-button" type="button">Tout effacer</button>
         <button id="save-button" type="button">Enregistrer en BMP</button>
         <span class="status" id="status">0 pixels colores</span>
@@ -206,6 +223,7 @@
 
     const canvas = document.getElementById("pixel-editor");
     const ctx = canvas.getContext("2d");
+    const eraserButton = document.getElementById("eraser-button");
     const clearButton = document.getElementById("clear-button");
     const saveButton = document.getElementById("save-button");
     const palette = document.getElementById("palette");
@@ -215,6 +233,7 @@
     let isPointerDown = false;
     let activePointerId = null;
     let toggledPixels = new Set();
+    let activeTool = "paint";
     let selectedColor = paletteColors.find((color) => color.name === "Noir").value;
 
     function countColoredPixels() {
@@ -231,7 +250,8 @@
 
     function updateStatus() {
       const total = countColoredPixels();
-      status.textContent = total <= 1 ? `${total} pixel colore` : `${total} pixels colores`;
+      const countText = total <= 1 ? `${total} pixel colore` : `${total} pixels colores`;
+      status.textContent = activeTool === "eraser" ? `Mode gomme · ${countText}` : countText;
     }
 
     function drawPixel(x, y) {
@@ -271,11 +291,28 @@
       return `${x},${y}`;
     }
 
+    function setTool(tool) {
+      activeTool = tool;
+      eraserButton.classList.toggle("active", tool === "eraser");
+      canvas.style.cursor = tool === "eraser" ? "cell" : "crosshair";
+
+      for (const button of palette.querySelectorAll(".color-button")) {
+        button.classList.toggle(
+          "active",
+          tool === "paint" && button.dataset.color === selectedColor,
+        );
+      }
+
+      updateStatus();
+    }
+
     function setSelectedColor(color) {
       selectedColor = color;
-      for (const button of palette.querySelectorAll(".color-button")) {
-        button.classList.toggle("active", button.dataset.color === color);
-      }
+      setTool("paint");
+    }
+
+    function toggleEraser() {
+      setTool(activeTool === "eraser" ? "paint" : "eraser");
     }
 
     function createPalette() {
@@ -303,14 +340,25 @@
       setSelectedColor(selectedColor);
     }
 
-    function paintPixelIfNeeded(x, y) {
+    function applyPixelIfNeeded(x, y) {
       const key = getPixelKey(x, y);
       if (toggledPixels.has(key)) {
         return;
       }
 
       toggledPixels.add(key);
-      pixels[y][x] = pixels[y][x] === selectedColor ? null : selectedColor;
+
+      if (activeTool === "eraser") {
+        if (pixels[y][x] === null) {
+          return;
+        }
+        pixels[y][x] = null;
+      } else if (pixels[y][x] === selectedColor) {
+        pixels[y][x] = null;
+      } else {
+        pixels[y][x] = selectedColor;
+      }
+
       drawPixel(x, y);
       updateStatus();
     }
@@ -407,7 +455,7 @@
       activePointerId = event.pointerId;
       toggledPixels = new Set();
       canvas.setPointerCapture(event.pointerId);
-      paintPixelIfNeeded(coords.x, coords.y);
+      applyPixelIfNeeded(coords.x, coords.y);
     });
 
     canvas.addEventListener("pointermove", (event) => {
@@ -420,7 +468,7 @@
         return;
       }
 
-      paintPixelIfNeeded(coords.x, coords.y);
+      applyPixelIfNeeded(coords.x, coords.y);
     });
 
     canvas.addEventListener("pointerup", (event) => {
@@ -460,7 +508,28 @@
       downloadBmp();
     });
 
+    eraserButton.addEventListener("click", () => {
+      toggleEraser();
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key !== "g" && event.key !== "G") {
+        return;
+      }
+
+      if (
+        event.target instanceof HTMLInputElement
+        || event.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      toggleEraser();
+    });
+
     createPalette();
+    setTool("paint");
     drawGrid();
   </script>
 </body>
